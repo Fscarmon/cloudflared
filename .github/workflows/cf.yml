@@ -29,10 +29,10 @@ jobs:
             goarch: arm64
           
           # FreeBSD
-          - os: freebsd
-            arch: amd64
-            goos: freebsd
-            goarch: amd64
+          #- os: freebsd
+          #  arch: amd64
+            #goos: freebsd
+         #   goarch: amd64
 
     steps:
       - name: Checkout code
