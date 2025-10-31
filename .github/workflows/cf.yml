@@ -1,0 +1,212 @@
+name: Build and Release Cloudflared
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送 v 开头的 tag 时触发，如 v1.0.0
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: linux
+            arch: armv7
+            runner: ubuntu-latest
+            goos: linux
+            goarch: arm
+            goarm: 7
+          
+          # Windows
+          - os: windows
+            arch: amd64
+            runner: ubuntu-latest
+            goos: windows
+            goarch: amd64
+            ext: .exe
+          - os: windows
+            arch: arm64
+            runner: ubuntu-latest
+            goos: windows
+            goarch: arm64
+            ext: .exe
+          
+          # macOS
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            goos: darwin
+            goarch: arm64
+          
+          # FreeBSD
+          - os: freebsd
+            arch: amd64
+            runner: ubuntu-latest
+            goos: freebsd
+            goarch: amd64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'  # 根据 cloudflared 要求调整版本
+          cache: true
+
+      - name: Get dependencies
+        run: go mod download
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+          echo "BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          echo "COMMIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: 0
+        run: |
+          OUTPUT_NAME="cloudflared-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          go build -v -trimpath \
+            -ldflags="-s -w \
+              -X 'main.Version=${{ steps.get_version.outputs.VERSION }}' \
+              -X 'main.BuildTime=${{ steps.get_version.outputs.BUILD_TIME }}' \
+              -X 'main.Commit=${{ steps.get_version.outputs.COMMIT_SHA }}'" \
+            -o "$OUTPUT_NAME" \
+            ./cmd/cloudflared
+          
+          # 压缩二进制文件
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            zip "${OUTPUT_NAME%.exe}.zip" "$OUTPUT_NAME"
+            echo "ASSET_NAME=${OUTPUT_NAME%.exe}.zip" >> $GITHUB_ENV
+          else
+            tar czf "${OUTPUT_NAME}.tar.gz" "$OUTPUT_NAME"
+            echo "ASSET_NAME=${OUTPUT_NAME}.tar.gz" >> $GITHUB_ENV
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflared-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ env.ASSET_NAME }}
+          retention-days: 5
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release_assets
+          find ./artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release_assets/ \;
+          ls -lh release_assets/
+
+      - name: Generate checksums
+        working-directory: release_assets
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          body: |
+            ## Cloudflared Custom Build ${{ steps.get_version.outputs.VERSION }}
+            
+            ### 🚀 Features
+            - 添加 TUNNEL_PROXY 环境变量支持
+            - 支持 SOCKS5/HTTP 代理连接到 Cloudflare Edge
+            
+            ### 📦 Downloads
+            根据你的操作系统和架构选择对应的文件：
+            
+            - **Linux**: `cloudflared-linux-amd64.tar.gz` / `cloudflared-linux-arm64.tar.gz`
+            - **Windows**: `cloudflared-windows-amd64.zip`
+            - **macOS**: `cloudflared-darwin-amd64.tar.gz` / `cloudflared-darwin-arm64.tar.gz`
+            
+            ### 🔐 Checksums
+            下载后请验证文件完整性，详见 `SHA256SUMS`
+            
+            ### 📖 Usage
+            ```bash
+            # 设置代理
+            export TUNNEL_PROXY=socks5://127.0.0.1:1080
+            
+            # 运行隧道
+            ./cloudflared tunnel run my-tunnel
+            ```
+            
+            ### 🔗 Links
+            - [官方文档](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
+            - [原版仓库](https://github.com/cloudflare/cloudflared)
+          files: |
+            release_assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to Release
+        if: success()
+        run: |
+          echo "✅ Release created successfully!"
+          echo "🔗 https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_version.outputs.VERSION }}"
