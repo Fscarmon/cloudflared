@@ -15,7 +15,9 @@ jobs:
   build:
     name: Build for ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ubuntu-latest
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         include:
           # Linux
@@ -29,10 +31,10 @@ jobs:
             goarch: arm64
           
           # FreeBSD
-          #- os: freebsd
-          #  arch: amd64
-            #goos: freebsd
-         #   goarch: amd64
+          - os: freebsd
+            arch: amd64
+            goos: freebsd
+            goarch: amd64
 
     steps:
       - name: Checkout code
@@ -75,9 +77,7 @@ jobs:
             -o "$OUTPUT_NAME" \
             ./cmd/cloudflared
           
-          # 压缩二进制文件
-          tar czf "${OUTPUT_NAME}.tar.gz" "$OUTPUT_NAME"
-          echo "ASSET_NAME=${OUTPUT_NAME}.tar.gz" >> $GITHUB_ENV
+          echo "ASSET_NAME=${OUTPUT_NAME}" >> $GITHUB_ENV
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -114,7 +114,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release_assets
-          find ./artifacts -type f -name "*.tar.gz" -exec cp {} release_assets/ \;
+          find ./artifacts -type f -name "cloudflared-*" -exec cp {} release_assets/ \;
           ls -lh release_assets/
 
       - name: Generate checksums
@@ -140,20 +140,23 @@ jobs:
             ### 📦 Downloads
             根据你的操作系统和架构选择对应的文件：
             
-            - **Linux AMD64**: `cloudflared-linux-amd64.tar.gz`
-            - **Linux ARM64**: `cloudflared-linux-arm64.tar.gz`
-            - **FreeBSD AMD64**: `cloudflared-freebsd-amd64.tar.gz`
+            - **Linux AMD64**: `cloudflared-linux-amd64`
+            - **Linux ARM64**: `cloudflared-linux-arm64`
+            - **FreeBSD AMD64**: `cloudflared-freebsd-amd64`
             
             ### 🔐 Checksums
             下载后请验证文件完整性，详见 `SHA256SUMS`
             
             ### 📖 Usage
             ```bash
+            # 下载后添加执行权限
+            chmod +x cloudflared-linux-amd64
+            
             # 设置代理
             export TUNNEL_PROXY=socks5://127.0.0.1:1080
             
             # 运行隧道
-            ./cloudflared tunnel run my-tunnel
+            ./cloudflared-linux-amd64 tunnel run my-tunnel
             ```
             
             ### 🔗 Links
