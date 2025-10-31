@@ -3,9 +3,11 @@ package edgediscovery
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -25,31 +27,120 @@ func DialEdge(
 		dialer.LocalAddr = &net.TCPAddr{IP: localIP, Port: 0}
 	}
 
-	var proxyDialer proxy.Dialer
-
-	// 优先使用自定义环境变量 TUNNEL_PROXY
-	// 这样只有隧道程序会使用代理，不影响其他工具
+	// 获取代理配置
 	tunnelProxy := os.Getenv("TUNNEL_PROXY")
 	if tunnelProxy == "" {
-		// 降级到标准环境变量（可选，如果不想支持可以删除这部分）
 		tunnelProxy = os.Getenv("ALL_PROXY")
 	}
 
+	// 解析多个代理地址（只使用空格分隔）
+	var proxyList []string
 	if tunnelProxy != "" {
-		// 解析代理 URL
-		proxyURL, err := url.Parse(tunnelProxy)
-		if err != nil {
-			return nil, newDialError(err, "Invalid TUNNEL_PROXY URL")
+		proxies := strings.Fields(tunnelProxy) // 自动处理多个空格和 trim
+		for _, p := range proxies {
+			if p != "" {
+				proxyList = append(proxyList, p)
+			}
 		}
-		proxyDialer, err = proxy.FromURL(proxyURL, &dialer)
-		if err != nil {
-			return nil, newDialError(err, "Failed to create proxy dialer")
-		}
-	} else {
-		// 没有设置代理，直接使用普通 dialer
-		proxyDialer = &dialer
 	}
 
+	// 如果没有代理，直接使用普通 dialer
+	if len(proxyList) == 0 {
+		fmt.Println("No proxy configured, connecting directly...")
+		conn, err := dialWithDialer(&dialer, ctx, timeout, tlsConfig, edgeTCPAddr)
+		if err != nil {
+			fmt.Printf("❌ Direct connection failed: %v\n", err)
+			return nil, err
+		}
+		fmt.Println("✅ Direct connection successful")
+		return conn, nil
+	}
+
+	fmt.Printf("Found %d proxy(s), starting rotation...\n", len(proxyList))
+
+	// 持续轮询尝试每个代理，直到成功或 context 取消
+	proxyIndex := 0
+	attemptCount := 0
+	roundCount := 0
+	for {
+		// 检查 context 是否已取消
+		select {
+		case <-ctx.Done():
+			fmt.Printf("❌ Context cancelled after %d attempts (%d rounds)\n", attemptCount, roundCount)
+			return nil, newDialError(ctx.Err(), fmt.Sprintf("Context cancelled after %d attempts", attemptCount))
+		default:
+		}
+
+		// 新一轮开始
+		if proxyIndex == 0 && attemptCount > 0 {
+			roundCount++
+			fmt.Printf("\n--- Round %d ---\n", roundCount)
+		}
+
+		proxyAddr := proxyList[proxyIndex]
+		attemptCount++
+
+		// 隐藏密码显示（安全考虑）
+		displayAddr := maskPassword(proxyAddr)
+		fmt.Printf("[%d/%d] Trying proxy: %s\n", proxyIndex+1, len(proxyList), displayAddr)
+
+		proxyURL, err := url.Parse(proxyAddr)
+		if err != nil {
+			fmt.Printf("❌ Invalid proxy URL: %v\n", err)
+			proxyIndex = (proxyIndex + 1) % len(proxyList)
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		proxyDialer, err := proxy.FromURL(proxyURL, &dialer)
+		if err != nil {
+			fmt.Printf("❌ Failed to create proxy dialer: %v\n", err)
+			proxyIndex = (proxyIndex + 1) % len(proxyList)
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		conn, err := dialWithDialer(proxyDialer, ctx, timeout, tlsConfig, edgeTCPAddr)
+		if err != nil {
+			fmt.Printf("❌ Proxy failed: %v\n", err)
+			proxyIndex = (proxyIndex + 1) % len(proxyList)
+			
+			// 如果已经尝试完一轮所有代理，稍微等待一下再继续
+			if proxyIndex == 0 {
+				fmt.Printf("All proxies tried, waiting 1 second before next round...\n")
+				time.Sleep(time.Second)
+			}
+			continue
+		}
+
+		// 连接成功
+		fmt.Printf("✅ Successfully connected via proxy: %s (after %d attempts)\n", displayAddr, attemptCount)
+		return conn, nil
+	}
+}
+
+// maskPassword 隐藏 URL 中的密码部分
+func maskPassword(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	if u.User != nil {
+		if _, hasPassword := u.User.Password(); hasPassword {
+			u.User = url.UserPassword(u.User.Username(), "****")
+		}
+	}
+	return u.String()
+}
+
+// dialWithDialer 使用指定的 dialer 进行连接
+func dialWithDialer(
+	proxyDialer proxy.Dialer,
+	ctx context.Context,
+	timeout time.Duration,
+	tlsConfig *tls.Config,
+	edgeTCPAddr *net.TCPAddr,
+) (net.Conn, error) {
 	// Inherit from parent context so we can cancel (Ctrl-C) while dialing
 	dialCtx, dialCancel := context.WithTimeout(ctx, timeout)
 	defer dialCancel()
@@ -75,7 +166,7 @@ func DialEdge(
 	tlsEdgeConn.SetDeadline(time.Now().Add(timeout))
 
 	if err = tlsEdgeConn.Handshake(); err != nil {
-		edgeConn.Close() // 清理连接
+		edgeConn.Close()
 		return nil, newDialError(err, "TLS handshake with edge error")
 	}
 
