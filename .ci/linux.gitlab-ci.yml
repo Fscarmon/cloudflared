@@ -1,12 +1,24 @@
 .golang-inputs: &golang_inputs
   runOnMR: true
-  runOnBranches: '^master$'
+  runOnBranches: "^master$"
   outputDir: artifacts
   runner: linux-x86-8cpu-16gb
   stage: build
-  golangVersion: "boring-1.24"
-  imageVersion: "3371-f5539bd6f83d@sha256:a2a68f580070f9411d0d3155959ed63b700ef319b5fcc62db340e92227bbc628"
+  golangVersion: "boring-1.26"
+  imageVersion: "3605-596a300@sha256:19fa512630b4c5681082c68fd98902e2f92092fc216412df44f7dda31cfa57c3"
   CGO_ENABLED: 1
+
+.default-packaging-job: &packaging-job-defaults
+  stage: package
+  needs:
+    - ci-image-get-image-ref
+  rules:
+    - !reference [.default-rules, run-on-master]
+  image: $BUILD_IMAGE
+  cache: {}
+  artifacts:
+    paths:
+      - artifacts/*
 
 include:
   ###################
@@ -53,7 +65,7 @@ include:
   - component: $CI_SERVER_FQDN/cloudflare/ci/golang/boring-make@~latest
     inputs:
       <<: *golang_inputs
-      runOnBranches: '^$'
+      runOnBranches: "^$"
       stage: validate
       jobPrefix: vulncheck
       GOLANG_MAKE_TARGET: vulncheck
@@ -61,7 +73,7 @@ include:
 #################################
 ### Run Linux Component Tests ###
 #################################
-component-tests-linux: &component-tests-linux
+linux-component-tests: &linux-component-tests
   stage: test
   extends: .component-tests
   needs:
@@ -81,11 +93,30 @@ component-tests-linux: &component-tests-linux
 ######################################
 ### Run Linux FIPS Component Tests ###
 ######################################
-component-tests-linux-fips:
-  <<: *component-tests-linux
+linux-component-tests-fips:
+  <<: *linux-component-tests
   needs:
     - ci-image-get-image-ref
     - linux-fips-build-boring-make
   variables:
     <<: *component-tests-variables
     COMPONENT_TESTS_FIPS: 1
+
+################################
+####### Linux Packaging ########
+################################
+linux-packaging:
+  <<: *packaging-job-defaults
+  parallel:
+    matrix:
+      - ARCH: ["386", "amd64", "arm", "armhf", "arm64"]
+  script:
+    - ./.ci/scripts/linux/build-packages.sh ${ARCH}
+
+################################
+##### Linux FIPS Packaging #####
+################################
+linux-packaging-fips:
+  <<: *packaging-job-defaults
+  script:
+    - ./.ci/scripts/linux/build-packages-fips.sh

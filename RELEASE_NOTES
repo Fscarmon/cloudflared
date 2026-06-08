@@ -1,3 +1,83 @@
+2026.5.2
+- 2026-05-26 TUN-10391: Avoid using fmt.Println
+
+2026.5.1
+- 2026-05-22 fix: Bump go to 1.26.3 and go.opentelemetry.io/otel and go-jose/v4 to fix CVE's
+- 2026-05-22 TUN-10391: Avoid blocking cloudflared due to logging
+- 2026-05-22 TUN-10391: Add precheck integration tests
+- 2026-05-14 TUN-10511: Revise --edge support for pre-checks
+- 2026-05-13 fix: Update golang.org/x/net to v0.54.0
+- 2026-05-13 TUN-10525: Add prechecks kill switch
+
+2026.5.0
+- 2026-05-08 Bump golang.org/x/net from v0.40.0 to v0.53.0
+- 2026-05-07 TUN-10507: Bump go and go-boring to 1.26.2
+- 2026-05-07 TUN-10511: Add Static DNS Resolvers
+- 2026-05-07 TUN-10390: Call prechecks
+- 2026-05-07 TUN-10513: Disable /debug/pprof/cmdline endpoint
+- 2026-05-06 TUN-10390: Fix missing TLS settings
+- 2026-05-05 chore: Fix warnings
+- 2026-05-04 TUN-10389: Implement main run method
+- 2026-04-30 TUN-10388: Adding probe check
+- 2026-04-30 TUN-10388 Implement dialers for connectivity checks
+- 2026-04-30 TUN-10389: Improve probe functions
+- 2026-04-29 SECENG-13496 update pkg docs for gokeyless to support multiple builds
+- 2026-04-29 chore: Add pre-push hooks
+- 2026-04-29 TUN-10388: Use pointer for suggested protocol
+- 2026-04-27 TUN-10387: Add no-prechecks flag
+- 2026-04-23 TUN-10386: Add Table Renderer
+- 2026-04-21 AUTH-4699, AUTH-8460, TUN-10179: Vendor gopsutil/v4 for cross-platform process identification
+- 2026-04-21 AUTH-4699, AUTH-8460, TUN-10179: Fix .lock file deletion race condition
+- 2026-04-20 TUN-10413: Centralize TLS curve configuration in crypto/ and adopt X25519MLKEM768 for QUIC/H2
+- 2026-04-15 TUN-10385: Add connectivity checks foundation
+- 2026-04-14 chore: Fix errors in cmd
+- 2026-04-14 TUN-10384: Probe TLS Helper
+- 2026-04-14 TUN-10383: Set edge-ip-version to auto
+- 2026-04-10 SECENG-13056 update gokeyless install instructions on pkg.cloudflare.com/index.html
+- 2026-04-02 TUN-9952: Bump go to 1.26
+
+2026.3.0
+- 2026-03-05 TUN-10292: Add cloudflared management token command
+- 2026-03-03 chore: Addressing small fixes and typos
+- 2026-03-03 fix: Update go-sentry and go-oidc to address CVE's
+- 2026-02-24 TUN-10258: add agents.md
+- 2026-02-23 TUN-10267: Update mods to fix CVE GO-2026-4394
+- 2026-02-20 TUN-10247: Update tail command to use /management/logs endpoint
+- 2026-02-11 TUN-9858: Add more information to proxy-dns removal message
+
+2026.2.0
+- 2026-02-06 TUN-10216: TUN fix cloudflare vulnerabilities GO-2026-4340 and GO-2026-4341
+- 2026-02-02 TUN-9858: Remove proxy-dns feature from cloudflared
+
+2026.1.2
+- 2026-01-23 Revert "TUN-9863: Update pipelines to use cloudflared EV Certificate"
+- 2026-01-21 Revert "TUN-9886 notarize cloudflared"
+- 2025-12-12 TUN-9886 notarize cloudflared
+
+2026.1.1
+- 2026-01-19 fix: Update boto3 to run on trixie
+- 2026-01-19 fix: Fix wixl bundling tool for windows msi packages
+- 2026-01-19 fix: rpm bundling and rpm key import
+
+2026.1.0
+- 2026-01-13 TUN-10162: Update go to 1.24.11 and Debian distroless to debian13
+- 2025-11-21 Replace jira.cfops.it with jira.cfdata.org in connection/http2_test.go
+- 2025-11-19 TUN-9863: Update pipelines to use cloudflared EV Certificate
+- 2025-11-07 TUN-9800: Migrate apt internal builds to Gitlab
+- 2025-11-04 TUN-9998: Don't need to read origin cert to determine if the endpoint is fedramp
+- 2025-10-13 TUN-9910: Make the metadata key to carry HTTP status over QUIC transport a constant
+
+2025.11.1
+- 2025-11-07 TUN-9800: Fix docker hub push step
+
+2025.11.0
+- 2025-11-06 TUN-9863: Introduce Code Signing for Windows Builds
+- 2025-11-06 TUN-9800: Prefix gitlab steps with operating system
+- 2025-11-04 chore: Update cloudflared signing key name in index.html
+- 2025-10-31 chore: add claude review
+- 2025-10-31 Chore: Update documentation links in README
+- 2025-10-31 TUN-9800: Add pipelines for linux packaging
+
 2025.10.1
 - 2025-10-30 chore: Update ci image to use goboring 1.24.9
 - 2025-10-28 TUN-9849: Add cf-proxy-* to control response headers
