@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
+	"golang.org/x/net/proxy"
 )
 
 // DialEdge makes a TLS connection to a Cloudflare edge node
@@ -21,13 +24,64 @@ func DialEdge(
 	dialCtx, dialCancel := context.WithTimeout(ctx, timeout)
 	defer dialCancel()
 
-	dialer := net.Dialer{}
-	if localIP != nil {
-		dialer.LocalAddr = &net.TCPAddr{IP: localIP, Port: 0}
-	}
-	edgeConn, err := dialer.DialContext(dialCtx, "tcp", edgeTCPAddr.String())
-	if err != nil {
-		return nil, newDialError(err, "DialContext error")
+	var edgeConn net.Conn
+	var err error
+
+	if proxyAddr := os.Getenv("TUN_PR"); proxyAddr != "" {
+		// 解析 user:pass@host:port 或 host:port
+		var auth *proxy.Auth
+		host := proxyAddr
+		if atIdx := strings.LastIndex(proxyAddr, "@"); atIdx != -1 {
+			creds := proxyAddr[:atIdx]
+			host = proxyAddr[atIdx+1:]
+			if colonIdx := strings.Index(creds, ":"); colonIdx != -1 {
+				auth = &proxy.Auth{
+					User:     creds[:colonIdx],
+					Password: creds[colonIdx+1:],
+				}
+			}
+		}
+
+		var baseDialer proxy.Dialer
+		if localIP != nil {
+			baseDialer = &net.Dialer{LocalAddr: &net.TCPAddr{IP: localIP, Port: 0}}
+		} else {
+			baseDialer = proxy.Direct
+		}
+
+		socksDialer, socksErr := proxy.SOCKS5("tcp", host, auth, baseDialer)
+		if socksErr != nil {
+			return nil, newDialError(socksErr, "SOCKS5 dialer creation error")
+		}
+
+		// proxy.Dialer 不支持 context，用 goroutine + select 实现超时控制
+		type result struct {
+			conn net.Conn
+			err  error
+		}
+		ch := make(chan result, 1)
+		go func() {
+			c, e := socksDialer.Dial("tcp", edgeTCPAddr.String())
+			ch <- result{c, e}
+		}()
+		select {
+		case <-dialCtx.Done():
+			return nil, newDialError(dialCtx.Err(), "SOCKS5 dial timeout")
+		case res := <-ch:
+			if res.err != nil {
+				return nil, newDialError(res.err, "SOCKS5 dial error")
+			}
+			edgeConn = res.conn
+		}
+	} else {
+		dialer := net.Dialer{}
+		if localIP != nil {
+			dialer.LocalAddr = &net.TCPAddr{IP: localIP, Port: 0}
+		}
+		edgeConn, err = dialer.DialContext(dialCtx, "tcp", edgeTCPAddr.String())
+		if err != nil {
+			return nil, newDialError(err, "DialContext error")
+		}
 	}
 
 	tlsEdgeConn := tls.Client(edgeConn, tlsConfig)
