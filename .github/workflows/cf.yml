@@ -1,3 +1,4 @@
+```yaml
 name: Build and Release Cloudflared
 
 on:
@@ -131,6 +132,66 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
+      - name: Write release notes
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          cat > release_notes.md << 'NOTES'
+          ## Cloudflared Custom Build VERSION_PLACEHOLDER
+
+          ### Changes
+          - 新增 TUN_PR 环境变量，支持通过 SOCKS5 代理连接 Cloudflare Edge
+
+          ### Downloads
+
+          | 文件 | 平台 |
+          |------|------|
+          | cloudflared-linux-amd64 | Linux x86_64 |
+          | cloudflared-linux-arm64 | Linux ARM64 |
+          | cloudflared-linux-armv6 | Linux ARMv6（树莓派等） |
+          | cloudflared-darwin-amd64 | macOS Intel |
+          | cloudflared-darwin-arm64 | macOS Apple Silicon |
+          | cloudflared-windows-amd64.exe | Windows x86_64 |
+
+          ### Usage
+
+          Linux / macOS
+
+          ```bash
+          chmod +x cloudflared-linux-amd64
+
+          # 无认证代理
+          export TUN_PR=127.0.0.1:1080
+
+          # 有认证代理
+          export TUN_PR=user:pass@127.0.0.1:1080
+
+          ./cloudflared-linux-amd64 tunnel run my-tunnel
+          ```
+
+          Windows (PowerShell)
+
+          ```powershell
+          # 无认证代理
+          $env:TUN_PR = "127.0.0.1:1080"
+
+          # 有认证代理
+          $env:TUN_PR = "user:pass@127.0.0.1:1080"
+
+          .\cloudflared-windows-amd64.exe tunnel run my-tunnel
+          ```
+
+          ### Checksums
+
+          ```bash
+          sha256sum -c SHA256SUMS
+          ```
+
+          ### Links
+          - 官方文档 https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/
+          - 原版仓库 https://github.com/cloudflare/cloudflared
+          NOTES
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" release_notes.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -138,57 +199,8 @@ jobs:
           name: Release ${{ steps.get_version.outputs.VERSION }}
           draft: false
           prerelease: false
-          body: |
-            ## Cloudflared Custom Build ${{ steps.get_version.outputs.VERSION }}
-
-            ### 🚀 Changes
-            - 新增 `TUN_PR` 环境变量，支持通过 SOCKS5 代理连接 Cloudflare Edge
-
-            ### 📦 Downloads
-
-            | 文件 | 平台 |
-            |------|------|
-            | `cloudflared-linux-amd64` | Linux x86_64 |
-            | `cloudflared-linux-arm64` | Linux ARM64 |
-            | `cloudflared-linux-armv6` | Linux ARMv6（树莓派等） |
-            | `cloudflared-darwin-amd64` | macOS Intel |
-            | `cloudflared-darwin-arm64` | macOS Apple Silicon |
-            | `cloudflared-windows-amd64.exe` | Windows x86_64 |
-
-            ### 📖 Usage
-
-            **Linux / macOS**
-```bash
-            chmod +x cloudflared-linux-amd64
-
-            # 无认证代理
-            export TUN_PR=127.0.0.1:1080
-
-            # 有认证代理
-            export TUN_PR=user:pass@127.0.0.1:1080
-
-            ./cloudflared-linux-amd64 tunnel run my-tunnel
-```
-
-            **Windows (PowerShell)**
-```powershell
-            # 无认证代理
-            $env:TUN_PR = "127.0.0.1:1080"
-
-            # 有认证代理
-            $env:TUN_PR = "user:pass@127.0.0.1:1080"
-
-            .\cloudflared-windows-amd64.exe tunnel run my-tunnel
-```
-
-            ### 🔐 Checksums
-```bash
-            sha256sum -c SHA256SUMS
-```
-
-            ### 🔗 Links
-            - [官方文档](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
-            - [原版仓库](https://github.com/cloudflare/cloudflared)
+          body_path: release_notes.md
           files: release_assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
