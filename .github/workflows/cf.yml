@@ -3,8 +3,8 @@ name: Build and Release Cloudflared
 on:
   push:
     tags:
-      - 'v*'  # 当推送 v 开头的 tag 时触发，如 v1.0.0
-  workflow_dispatch:  # 允许手动触发
+      - 'v*'
+  workflow_dispatch:
     inputs:
       version:
         description: 'Release version (e.g., v1.0.0)'
@@ -20,21 +20,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux
-          - os: linux
-            arch: amd64
-            goos: linux
-            goarch: amd64
-          - os: linux
-            arch: arm64
-            goos: linux
-            goarch: arm64
-          
-          # FreeBSD
-          - os: freebsd
-            arch: amd64
-            goos: freebsd
-            goarch: amd64
+          - { os: linux,   arch: amd64,  goos: linux,   goarch: amd64 }
+          - { os: linux,   arch: arm64,  goos: linux,   goarch: arm64 }
+          - { os: linux,   arch: armv6,  goos: linux,   goarch: arm,  goarm: 6 }
+          - { os: darwin,  arch: amd64,  goos: darwin,  goarch: amd64 }
+          - { os: darwin,  arch: arm64,  goos: darwin,  goarch: arm64 }
+          - { os: windows, arch: amd64,  goos: windows, goarch: amd64 }
 
     steps:
       - name: Checkout code
@@ -45,7 +36,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'  # 根据 cloudflared 要求调整版本
+          go-version: '1.22'
           cache: true
 
       - name: Get dependencies
@@ -59,24 +50,33 @@ jobs:
           else
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
-          echo "BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          echo "BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
           echo "COMMIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: 0
         run: |
-          OUTPUT_NAME="cloudflared-${{ matrix.os }}-${{ matrix.arch }}"
+          PKG="github.com/cloudflare/cloudflared/cmd/cloudflared/updater"
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          BUILD_TIME="${{ steps.get_version.outputs.BUILD_TIME }}"
+          COMMIT="${{ steps.get_version.outputs.COMMIT_SHA }}"
+
+          EXT=""
+          [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
+          OUTPUT_NAME="cloudflared-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
+
           go build -v -trimpath \
             -ldflags="-s -w \
-              -X 'main.Version=${{ steps.get_version.outputs.VERSION }}' \
-              -X 'main.BuildTime=${{ steps.get_version.outputs.BUILD_TIME }}' \
-              -X 'main.Commit=${{ steps.get_version.outputs.COMMIT_SHA }}'" \
-            -o "$OUTPUT_NAME" \
+              -X '${PKG}.Version=${VERSION}' \
+              -X '${PKG}.BuildTime=${BUILD_TIME}' \
+              -X '${PKG}.Commit=${COMMIT}'" \
+            -o "${OUTPUT_NAME}" \
             ./cmd/cloudflared
-          
+
           echo "ASSET_NAME=${OUTPUT_NAME}" >> $GITHUB_ENV
 
       - name: Upload artifact
@@ -92,7 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -101,9 +101,17 @@ jobs:
         id: get_version
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            VERSION="${{ github.event.inputs.version }}"
           else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "${VERSION}" || true
+            git push origin "${VERSION}" || true
           fi
 
       - name: Download all artifacts
@@ -114,7 +122,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release_assets
-          find ./artifacts -type f -name "cloudflared-*" -exec cp {} release_assets/ \;
+          find ./artifacts -type f \( -name "cloudflared-*" \) -exec cp {} release_assets/ \;
           ls -lh release_assets/
 
       - name: Generate checksums
@@ -124,7 +132,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           name: Release ${{ steps.get_version.outputs.VERSION }}
@@ -132,43 +140,55 @@ jobs:
           prerelease: false
           body: |
             ## Cloudflared Custom Build ${{ steps.get_version.outputs.VERSION }}
-            
-            ### 🚀 Features
-            - 添加 TUNNEL_PROXY 环境变量支持
-            - 支持 SOCKS5/HTTP 代理连接到 Cloudflare Edge
-            
+
+            ### 🚀 Changes
+            - 新增 `TUN_PR` 环境变量，支持通过 SOCKS5 代理连接 Cloudflare Edge
+
             ### 📦 Downloads
-            根据你的操作系统和架构选择对应的文件：
-            
-            - **Linux AMD64**: `cloudflared-linux-amd64`
-            - **Linux ARM64**: `cloudflared-linux-arm64`
-            - **FreeBSD AMD64**: `cloudflared-freebsd-amd64`
-            
-            ### 🔐 Checksums
-            下载后请验证文件完整性，详见 `SHA256SUMS`
-            
+
+            | 文件 | 平台 |
+            |------|------|
+            | `cloudflared-linux-amd64` | Linux x86_64 |
+            | `cloudflared-linux-arm64` | Linux ARM64 |
+            | `cloudflared-linux-armv6` | Linux ARMv6（树莓派等） |
+            | `cloudflared-darwin-amd64` | macOS Intel |
+            | `cloudflared-darwin-arm64` | macOS Apple Silicon |
+            | `cloudflared-windows-amd64.exe` | Windows x86_64 |
+
             ### 📖 Usage
-            ```bash
-            # 下载后添加执行权限
+
+            **Linux / macOS**
+```bash
             chmod +x cloudflared-linux-amd64
-            
-            # 设置代理
-            export TUNNEL_PROXY=socks5://127.0.0.1:1080
-            
-            # 运行隧道
+
+            # 无认证代理
+            export TUN_PR=127.0.0.1:1080
+
+            # 有认证代理
+            export TUN_PR=user:pass@127.0.0.1:1080
+
             ./cloudflared-linux-amd64 tunnel run my-tunnel
-            ```
-            
+```
+
+            **Windows (PowerShell)**
+```powershell
+            # 无认证代理
+            $env:TUN_PR = "127.0.0.1:1080"
+
+            # 有认证代理
+            $env:TUN_PR = "user:pass@127.0.0.1:1080"
+
+            .\cloudflared-windows-amd64.exe tunnel run my-tunnel
+```
+
+            ### 🔐 Checksums
+```bash
+            sha256sum -c SHA256SUMS
+```
+
             ### 🔗 Links
             - [官方文档](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
             - [原版仓库](https://github.com/cloudflare/cloudflared)
-          files: |
-            release_assets/*
+          files: release_assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload to Release
-        if: success()
-        run: |
-          echo "✅ Release created successfully!"
-          echo "🔗 https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_version.outputs.VERSION }}"
